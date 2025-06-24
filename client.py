@@ -10,16 +10,18 @@ fn = SamMask()
 
 img_path = "sample.JPG"
 img_bytes = pathlib.Path(img_path).read_bytes()
-result = fn.get_first_mask.remote(img_bytes)
+result = fn.get_all_masks.remote(img_bytes)
 
 if "error" in result:
     print(f"Error: {result['error']}")
 else:
-    mask_data = base64.b64decode(result["mask_base64"])
-    with open("mask_output.png", "wb") as f:
-        f.write(mask_data)
+    masks = result["masks"]
+    for i, mask in enumerate(masks):
+        mask_data = base64.b64decode(mask["mask_base64"])
+        filename = f"mask_{i+1}.png"
+        with open(filename, "wb") as f:
+            f.write(mask_data)
+        print(f"✓ {filename} saved (area: {mask['area']}, score: {mask['stability_score']:.3f})")
     
-    print(f"Mask saved to mask_output.png")
-    print(f"Total masks found: {result['total_masks']}")
-    print(f"Mask area: {result['mask_area']}")
-    print(f"Stability score: {result['stability_score']:.3f}")
+    print(f"\nTotal masks found: {result['total_masks_found']}")
+    print(f"Top masks saved: {result['returned_masks']}")

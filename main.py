@@ -5,12 +5,12 @@ import base64, io, cv2, numpy as np
 from PIL import Image
 
 APP_NAME   = "sam-first-mask-fast"
-WEIGHT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
-WEIGHT_LOC = "/model/sam_vit_h_4b8939.pth"
+WEIGHT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+WEIGHT_LOC = "/model/sam_vit_b_01ec64.pth"
 
 # ── 1. イメージ: CUDA 12.1 wheel を extra_index_url で取得 ─────────────
 image = (
-    modal.Image.debian_slim()
+    modal.Image.from_registry("python:3.11-slim")
     .apt_install(                       # ← curl を先頭に追加
         "curl",
         "libgl1-mesa-glx", "libglib2.0-0",
@@ -22,7 +22,7 @@ image = (
         "segment-anything",
         "opencv-python-headless",
         "Pillow",
-        "numpy",
+        "numpy<2.0",
         extra_index_url="https://download.pytorch.org/whl/cu121",
     )
     .run_commands(
@@ -40,8 +40,8 @@ app = modal.App(APP_NAME)
 
 @app.cls(
     image=image,
-    gpu="A10G",
-    memory=4096,
+    gpu="H100",
+    memory=16384,
     enable_memory_snapshot=True,
     min_containers=0,
     scaledown_window=5,
@@ -50,8 +50,16 @@ class SamMask:
     @modal.enter(snap=True)                 # ① CPU でロード→スナップ
     def load_cpu(self):
         from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
-        self.sam = sam_model_registry["vit_h"](checkpoint=WEIGHT_LOC)
-        self.generator = SamAutomaticMaskGenerator(self.sam)
+        self.sam = sam_model_registry["vit_b"](checkpoint=WEIGHT_LOC)
+        self.generator = SamAutomaticMaskGenerator(
+            self.sam,
+            points_per_side=8,
+            pred_iou_thresh=0.9,
+            stability_score_thresh=0.95,
+            crop_n_layers=0,
+            crop_n_points_downscale_factor=1,
+            min_mask_region_area=10000,
+        )
 
     @modal.enter(snap=False)                # ② cold-start 復元後 GPU へ
     def to_gpu(self):
@@ -61,7 +69,7 @@ class SamMask:
     @modal.method()                         # ③ 呼び出しエンドポイント
     def get_first_mask(self, img_bytes: bytes) -> Dict[str, Any]:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        arr = np.array(img, dtype=np.uint8)
+        arr = np.asarray(img, dtype=np.uint8)
         masks = self.generator.generate(arr)
         if not masks:
             return {"error": "No masks generated"}
