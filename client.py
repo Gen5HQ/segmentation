@@ -24,4 +24,3 @@ else:
         print(f"✓ {filename} saved (area: {mask['area']}, score: {mask['stability_score']:.3f})")
     
     print(f"\nTotal masks found: {result['total_masks_found']}")
-    print(f"Top masks saved: {result['returned_masks']}")

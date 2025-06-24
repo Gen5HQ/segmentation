@@ -5,8 +5,8 @@ import base64, io, cv2, numpy as np
 from PIL import Image
 
 APP_NAME   = "sam-first-mask-fast"
-WEIGHT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
-WEIGHT_LOC = "/model/sam_vit_b_01ec64.pth"
+WEIGHT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth"
+WEIGHT_LOC = "/model/sam_vit_l_0b3195.pth"
 
 # ── 1. イメージ: CUDA 12.1 wheel を extra_index_url で取得 ─────────────
 image = (
@@ -50,7 +50,7 @@ class SamMask:
     @modal.enter(snap=True)                 # ① CPU でロード→スナップ
     def load_cpu(self):
         from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
-        self.sam = sam_model_registry["vit_b"](checkpoint=WEIGHT_LOC)
+        self.sam = sam_model_registry["vit_l"](checkpoint=WEIGHT_LOC)
         self.generator = SamAutomaticMaskGenerator(
             self.sam,
             points_per_side=8,
@@ -67,23 +67,33 @@ class SamMask:
         self.sam.to("cuda" if torch.cuda.is_available() else "cpu")
 
     @modal.method()                         # ③ 呼び出しエンドポイント
-    def get_first_mask(self, img_bytes: bytes) -> Dict[str, Any]:
+    def get_all_masks(self, img_bytes: bytes) -> Dict[str, Any]:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         arr = np.asarray(img, dtype=np.uint8)
         masks = self.generator.generate(arr)
         if not masks:
             return {"error": "No masks generated"}
 
-        m0 = masks[0]["segmentation"].astype(np.uint8) * 255
-        ok, buf = cv2.imencode(".png", m0)
-        if not ok:
-            return {"error": "Encode failed"}
+        # 面積で降順ソートして上位5個まで取得
+        masks_sorted = sorted(masks, key=lambda x: x.get("area", 0), reverse=True)
+        
+        mask_results = []
+        for i, mask in enumerate(masks_sorted):
+            m = mask["segmentation"].astype(np.uint8) * 255
+            ok, buf = cv2.imencode(".png", m)
+            if not ok:
+                continue
+
+            mask_results.append({
+                "mask_base64": base64.b64encode(buf).decode(),
+                "area": mask.get("area", 0),
+                "stability_score": mask.get("stability_score", 0),
+                "bbox": mask.get("bbox", [0, 0, 0, 0]),
+            })
 
         return {
-            "mask_base64": base64.b64encode(buf).decode(),
-            "total_masks": len(masks),
-            "mask_area": masks[0].get("area", 0),
-            "stability_score": masks[0].get("stability_score", 0),
+            "masks": mask_results,
+            "total_masks_found": len(masks),
         }
 
 # ── 3. ローカルテスト ───────────────────────────────────
@@ -91,5 +101,5 @@ class SamMask:
 def main(path: str = "sample.jpg"):
     with open(path, "rb") as f:
         bytes_ = f.read()
-    res = SamMask().get_first_mask.remote(bytes_)
+    res = SamMask().get_all_masks.remote(bytes_)
     print(res)
