@@ -10,7 +10,7 @@ WEIGHT_LOC = "/model/sam_vit_l_0b3195.pth"
 
 # ── 1. イメージ: CUDA 12.1 wheel を extra_index_url で取得 ─────────────
 image = (
-    modal.Image.debian_slim()
+    modal.Image.from_registry("python:3.11-slim")
     .apt_install(
         "curl",
         "libgl1-mesa-glx", "libglib2.0-0",
@@ -53,7 +53,7 @@ class SamMask:
         self.sam = sam_model_registry["vit_l"](checkpoint=WEIGHT_LOC)
         self.generator = SamAutomaticMaskGenerator(
             self.sam,
-            points_per_side=8,
+            points_per_side=6,
             pred_iou_thresh=0.95,
             stability_score_thresh=0.9,
             crop_n_layers=0,
