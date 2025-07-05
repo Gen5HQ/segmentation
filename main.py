@@ -4,7 +4,7 @@ from typing import Dict, Any
 import base64, io, cv2, numpy as np
 from PIL import Image
 
-APP_NAME   = "sam-first-mask-fast"
+APP_NAME   = "gen5-segmentation"
 WEIGHT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth"
 WEIGHT_LOC = "/model/sam_vit_l_0b3195.pth"
 
@@ -23,6 +23,7 @@ image = (
         "opencv-python-headless",
         "Pillow",
         "numpy<2.0",
+        "fastapi[standard]",
         extra_index_url="https://download.pytorch.org/whl/cu121",
     )
     .run_commands(
@@ -96,10 +97,45 @@ class SamMask:
             "total_masks_found": len(masks),
         }
 
-# ── 3. ローカルテスト ───────────────────────────────────
-@app.local_entrypoint()
-def main(path: str = "sample.jpg"):
-    with open(path, "rb") as f:
-        bytes_ = f.read()
-    res = SamMask().get_all_masks.remote(bytes_)
-    print(res)
+# ── 3. HTTPSエンドポイント ─────────────────────────────
+@app.function(image=image)
+@modal.fastapi_endpoint(method="POST")
+def generate_mask(item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Node.jsから呼び出し可能なHTTPSエンドポイント
+    
+    POSTリクエストの body:
+    {
+        "image": "base64エンコードされた画像データ"
+    }
+    
+    レスポンス:
+    {
+        "masks": [
+            {
+                "mask_base64": "base64エンコードされたマスク画像",
+                "area": 面積,
+                "stability_score": 安定性スコア,
+                "bbox": [x, y, width, height]
+            },
+            ...
+        ],
+        "total_masks_found": 見つかったマスクの総数
+    }
+    """
+    try:
+        # base64デコード
+        img_base64 = item.get("image", "")
+        if not img_base64:
+            return {"error": "No image data provided"}
+        
+        img_bytes = base64.b64decode(img_base64)
+        
+        # SAMで処理
+        result = SamMask().get_all_masks.remote(img_bytes)
+        
+        # FastAPIの場合、辞書形式で返す
+        return result
+        
+    except Exception as e:
+        return {"error": str(e)}
