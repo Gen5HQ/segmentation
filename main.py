@@ -41,7 +41,7 @@ app = modal.App(APP_NAME)
 
 @app.cls(
     image=image,
-    gpu="H100",
+    gpu="T4",
     memory=4096,
     enable_memory_snapshot=True,
     min_containers=0,
@@ -61,16 +61,19 @@ class SamMask:
             crop_n_points_downscale_factor=1,
             min_mask_region_area=10000,
         )
+        print("loaded to cpu")
 
     @modal.enter(snap=False)                # ② cold-start 復元後 GPU へ
     def to_gpu(self):
         import torch
         self.sam.to("cuda" if torch.cuda.is_available() else "cpu")
+        print("loaded to gpu")
 
     @modal.method()                         # ③ 呼び出しエンドポイント
     def get_all_masks(self, img_bytes: bytes) -> Dict[str, Any]:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         arr = np.asarray(img, dtype=np.uint8)
+        print("start")
         masks = self.generator.generate(arr)
         if not masks:
             return {"error": "No masks generated"}
@@ -91,7 +94,7 @@ class SamMask:
                 "stability_score": mask.get("stability_score", 0),
                 "bbox": mask.get("bbox", [0, 0, 0, 0]),
             })
-
+        print("end")
         return {
             "masks": mask_results,
             "total_masks_found": len(masks),
@@ -132,6 +135,7 @@ def generate_mask(item: Dict[str, Any]) -> Dict[str, Any]:
         img_bytes = base64.b64decode(img_base64)
         
         # SAMで処理
+        print("http server loading done")
         result = SamMask().get_all_masks.remote(img_bytes)
         
         # FastAPIの場合、辞書形式で返す
