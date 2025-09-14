@@ -120,79 +120,15 @@ class SamMask:
             mask_results.append({
                 "mask_base64": base64.b64encode(buf).decode(),
                 "area": area,
-                "score": float(best_score),
-                "bbox_index": bbox_idx,
-                "input_bbox": bbox,
+                "bbox": bbox,
             })
         
-        return {
-            "masks": mask_results,
-            "total_masks_found": len(mask_results),
-        }
-
-    @modal.method()                         # ③ 呼び出しエンドポイント
-    def get_all_masks(self, img_bytes: bytes) -> Dict[str, Any]:
-        import base64, io, cv2, numpy as np
-        from PIL import Image
-        
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        arr = np.asarray(img, dtype=np.uint8)
-        print("start")
-        masks = self.generator.generate(arr)
-        if not masks:
-            return {"error": "No masks generated"}
-
-        # 面積で降順ソートして上位5個まで取得
-        masks_sorted = sorted(masks, key=lambda x: x.get("area", 0), reverse=True)
-        
-        mask_results = []
-        for mask in masks_sorted:
-            m = mask["segmentation"].astype(np.uint8) * 255
-            ok, buf = cv2.imencode(".png", m)
-            if not ok:
-                continue
-
-            mask_results.append({
-                "mask_base64": base64.b64encode(buf).decode(),
-                "area": mask.get("area", 0),
-                "stability_score": mask.get("stability_score", 0),
-                "bbox": mask.get("bbox", [0, 0, 0, 0]),
-            })
-        print("end")
-        return {
-            "masks": mask_results,
-            "total_masks_found": len(masks),
-        }
+        return {"masks": mask_results}
 
 # ── 3. HTTPSエンドポイント ─────────────────────────────
 @app.function(image=image)
 @modal.fastapi_endpoint(method="POST")
 def generate_mask(item: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Node.jsから呼び出し可能なHTTPSエンドポイント
-    
-    POSTリクエストの body:
-    {
-        "image": "base64エンコードされた画像データ",
-        "bboxes": [[x, y, width, height], ...] (オプション),
-        "multimask_output": true/false (オプション、デフォルト: false)
-    }
-    
-    レスポンス:
-    {
-        "masks": [
-            {
-                "mask_base64": "base64エンコードされたマスク画像",
-                "area": 面積,
-                "score" or "stability_score": スコア,
-                "bbox" or "input_bbox": bbox情報,
-                "bbox_index": bboxインデックス（bbox指定時のみ）
-            },
-            ...
-        ],
-        "total_masks_found": 見つかったマスクの総数
-    }
-    """
     try:
         # base64デコード
         img_base64 = item.get("image", "")
