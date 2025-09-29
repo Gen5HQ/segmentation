@@ -11,7 +11,7 @@ image = (
     modal.Image.from_registry("python:3.11-slim")
     .apt_install(
         "curl",
-        "libgl1-mesa-glx", "libglib2.0-0",
+        "libgl1-mesa-dev", "libglib2.0-0",
         "libsm6", "libxext6", "libxrender-dev", "libgomp1"
     )
     .pip_install(
@@ -60,6 +60,8 @@ class SamMask:
             min_mask_region_area=10000,
         )
         self.predictor = SamPredictor(self.sam)
+        # セッション管理用の辞書
+        self.sessions = {}
         print("loaded to cpu")
 
     @modal.enter(snap=False)                # ② cold-start 復元後 GPU へ
@@ -125,6 +127,110 @@ class SamMask:
         
         return {"masks": mask_results}
 
+
+    @modal.method()
+    def init_session(self, session_id: str, img_bytes: bytes) -> Dict[str, Any]:
+        """
+        セッションを初期化し、画像を設定する
+        """
+        import io, numpy as np
+        from PIL import Image
+
+        try:
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            arr = np.asarray(img, dtype=np.uint8)
+
+            # predictorに画像を設定
+            self.predictor.set_image(arr)
+
+            # セッション情報を保存
+            self.sessions[session_id] = {
+                "has_image": True,
+                "curr_lowres": None,  # 前回のlow-res logits
+                "image_shape": arr.shape[:2]  # (H, W)
+            }
+
+            return {
+                "session_id": session_id,
+                "status": "initialized",
+                "image_shape": arr.shape[:2]
+            }
+        except Exception as e:
+            return {"error": f"Failed to initialize session: {str(e)}"}
+
+    @modal.method()
+    def infer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        セッションベースの推論を実行
+        """
+        import numpy as np, base64, io, cv2
+
+        session_id = payload.get("session_id")
+        if not session_id or session_id not in self.sessions:
+            return {"error": "Invalid or missing session_id"}
+
+        session = self.sessions[session_id]
+        if not session.get("has_image"):
+            return {"error": "Session not initialized with image"}
+
+        mode = payload.get("mode")
+
+        if mode == "points":
+            pts = payload.get("points", [])
+            if not pts:
+                return {"error": "No points provided"}
+
+            # point_coords と point_labels を構築
+            point_coords = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+            point_labels = np.array([p["label"] for p in pts], dtype=np.int32)
+
+            # オプションのbox
+            box = payload.get("box")
+            box_np = np.array(box, dtype=np.float32) if box else None
+
+            # 前回のlow-res logitsを取得
+            mask_input = session.get("curr_lowres")
+
+            # 推論実行
+            masks, scores, lowres = self.predictor.predict(
+                point_coords=point_coords,
+                point_labels=point_labels,
+                box=box_np,
+                mask_input=mask_input,
+                multimask_output=payload.get("multimask_output", True)
+            )
+
+            if len(masks) == 0:
+                return {"error": "No masks generated"}
+
+            # 最高スコアのマスクを選択
+            best_idx = int(np.argmax(scores))
+            best_mask = masks[best_idx]
+            best_score = float(scores[best_idx])
+
+            # 次回用にlow-res logitsを保存
+            session["curr_lowres"] = lowres[best_idx][None, ...]
+
+            # マスクをPNG形式にエンコード
+            mask_uint8 = best_mask.astype(np.uint8) * 255
+            ok, buf = cv2.imencode(".png", mask_uint8)
+            if not ok:
+                return {"error": "Failed to encode mask"}
+
+            mask_base64 = base64.b64encode(buf).decode()
+            area = int(np.sum(best_mask))
+
+            return {
+                "mask": mask_base64,
+                "score": best_score,
+                "area": area,
+                "candidates": len(scores),
+                "session_id": session_id
+            }
+
+        else:
+            return {"error": f"Unsupported mode: {mode}"}
+
 # ── 3. HTTPSエンドポイント ─────────────────────────────
 @app.function(image=image)
 @modal.fastapi_endpoint(method="POST")
@@ -138,21 +244,40 @@ def generate_mask(item: Dict[str, Any]) -> Dict[str, Any]:
         import base64
         img_bytes = base64.b64decode(img_base64)
         
-        # bboxesが指定されている場合は新しいメソッドを使用
+        # pointsまたはbboxesの処理
+        points = item.get("points")
         bboxes = item.get("bboxes")
         multimask_output = item.get("multimask_output", False)
-        
-        if bboxes is not None:
+
+        if points is not None:
+            # points指定時はセッションベースを使用
+            session_id = item.get("session_id", "temp_session")
+            sam_instance = SamMask()
+
+            # 一時的にセッション初期化
+            init_result = sam_instance.init_session.remote(session_id, img_bytes)
+            if "error" in init_result:
+                return init_result
+
+            # points推論
+            payload = {
+                "session_id": session_id,
+                "mode": "points",
+                "points": points,
+                "multimask_output": multimask_output
+            }
+            result = sam_instance.infer.remote(payload)
+
+        elif bboxes is not None:
             # bbox指定時の処理
             print("http server loading done (bbox mode)")
             result = SamMask().get_masks_for_bboxes.remote(img_bytes, bboxes, multimask_output)
         else:
-            # 従来の全体マスク生成
-            print("http server loading done (all masks mode)")
-            result = SamMask().get_all_masks.remote(img_bytes)
-        
+            # pointsもbboxesも指定されていない場合はエラー
+            return {"error": "Either 'points' or 'bboxes' parameter is required"}
+
         # FastAPIの場合、辞書形式で返す
         return result
-        
+
     except Exception as e:
         return {"error": str(e)}
