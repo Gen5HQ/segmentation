@@ -1,14 +1,13 @@
-version: '3.8'
+version: "3.8"
 
 services:
   segmentation:
     build: .
-    container_name: sam-segmentation
+    container_name: gen5-segmentation
     ports:
       - "8000:8000"
     volumes:
       - ./models:/models:ro
-      - ./main.py:/app/main.py:ro
     environment:
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
       - HIP_VISIBLE_DEVICES=0

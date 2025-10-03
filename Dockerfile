@@ -1,4 +1,5 @@
-FROM rocm/pytorch:rocm6.0_ubuntu22.04_py3.10_pytorch_2.1.1
+# AMD GPU用のベースイメージに変更
+FROM rocm/pytorch:rocm7.1_ubuntu24.04_py3.12_pytorch_release_2.7.1
 
 WORKDIR /app
 
@@ -15,10 +16,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+# ROCm用のPyTorchを先にインストール（requirements.txt内のtorch/torchvisionを上書き）
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/rocm6.2
+# その他の依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 
+# AMD GPU環境変数
 ENV HSA_OVERRIDE_GFX_VERSION=10.3.0
 ENV HIP_VISIBLE_DEVICES=0
 ENV ROCR_VISIBLE_DEVICES=0
