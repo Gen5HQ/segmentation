@@ -6,10 +6,12 @@ import numpy as np
 import cv2
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from PIL import Image
 from segment_anything import sam_model_registry, SamPredictor
 from contextlib import asynccontextmanager
+import json
 
 MODEL_TYPE = "vit_b"
 MODEL_PATH = "/models/sam_vit_b_01ec64.pth"
@@ -21,6 +23,7 @@ class SegmentationRequest(BaseModel):
     image: str
     bboxes: Optional[List[List[int]]] = None
     multimask_output: Optional[bool] = False
+    with_encoding: Optional[bool] = False
 
 class MaskResult(BaseModel):
     mask_base64: str
@@ -136,7 +139,17 @@ async def generate_mask(request: SegmentationRequest) -> Dict[str, Any]:
                         "score": best_score
                     })
 
-        return {"masks": mask_results}
+        if request.with_encoding:
+            encoding = predictor.get_image_embedding().cpu().numpy()
+            file = io.BytesIO()
+            np.savez_compressed(file, encoding=encoding)
+            def body():
+                yield json.dumps({ "masks": mask_results })
+                yield file.getvalue()
+                file.close()
+            return StreamingResponse(body())
+        else:
+            return {"masks": mask_results}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
