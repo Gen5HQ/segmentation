@@ -1,5 +1,5 @@
 # AMD GPU用のベースイメージに変更
-FROM rocm/pytorch:rocm7.1_ubuntu24.04_py3.12_pytorch_release_2.7.1
+FROM rocm/pytorch:rocm6.4.4_ubuntu24.04_py3.12_pytorch_release_2.7.1
 
 WORKDIR /app
 
