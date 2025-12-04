@@ -21,7 +21,7 @@ RUN pip3 install --upgrade pip
 
 # PyTorch ROCm版のインストール
 # ROCm 6.4.4に対応するPyTorch 2.5系をインストール
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4
 
 # 作業ディレクトリの設定
 WORKDIR /workspace
