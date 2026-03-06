@@ -7,8 +7,10 @@ requires-python = ">=3.8"
 dependencies = [
     "fastapi>=0.120.4",
     "jupyter>=1.1.1",
+    "opencv-python>=4.12.0.88",
     "segment-anything>=1.0",
     "torch==2.0",
+    "torch-directml>=0.2.0.dev230426",
     "torchvision>=0.15.1",
     "uvicorn[standard]>=0.33.0",
 ]

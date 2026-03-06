@@ -14,8 +14,13 @@ from contextlib import asynccontextmanager
 import json
 
 MODEL_TYPE = "vit_b"
-MODEL_PATH = "/models/sam_vit_b_01ec64.pth"
+MODEL_PATH = "/models/sam_vit_b_01ec64.pth" if os.path.exists("/models/sam_vit_b_01ec64.pth") else "./models/sam_vit_b_01ec64.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+if os.environ["DML"]:
+    print('Using DirectML backend')
+    import torch_directml
+    DEVICE = torch_directml.device()
 
 predictor = None
 
@@ -57,7 +62,7 @@ app = FastAPI(title="SAM Segmentation API", lifespan=lifespan)
 async def health_check():
     return {
         "status": "healthy",
-        "device": DEVICE,
+        "device": str(DEVICE),
         "model": MODEL_TYPE,
         "cuda_available": torch.cuda.is_available()
     }
