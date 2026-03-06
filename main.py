@@ -12,12 +12,14 @@ from PIL import Image
 from segment_anything import sam_model_registry, SamPredictor
 from contextlib import asynccontextmanager
 import json
+import sys
+import traceback
 
 MODEL_TYPE = "vit_b"
 MODEL_PATH = "/models/sam_vit_b_01ec64.pth" if os.path.exists("/models/sam_vit_b_01ec64.pth") else "./models/sam_vit_b_01ec64.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-if os.environ["DML"]:
+if os.environ.get("TORCH_BACKEND", "") == "DML" or '--use-dml' in sys.argv:
     print('Using DirectML backend')
     import torch_directml
     DEVICE = torch_directml.device()
@@ -157,6 +159,7 @@ async def generate_mask(request: SegmentationRequest) -> Dict[str, Any]:
             return {"masks": mask_results}
 
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
